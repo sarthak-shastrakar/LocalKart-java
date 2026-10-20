@@ -1,0 +1,33 @@
+# Dependencies
+frontend/node_modules/
+node_modules/
+
+# Build outputs
+backend/target/
+frontend/dist/
+frontend/dist-ssr/
+
+# Environment / Secret keys
+*.env
+*.env.local
+*.env.*.local
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+
+# IDE & Editor files
+.idea/
+.vscode/
+*.iml
+*.iws
+*.ipr
+.settings/
+.classpath
+.project
+
+# OS Generated
+Thumbs.db
+Desktop.ini
+.DS_Store
