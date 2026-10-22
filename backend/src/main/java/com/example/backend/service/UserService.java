@@ -17,10 +17,10 @@ public class UserService {
     private final UnblockAppealRepository appealRepository;
 
     public UserService(UserRepository userRepository,
-                       CartRepository cartRepository,
-                       StoreRepository storeRepository,
-                       ProductRepository productRepository,
-                       UnblockAppealRepository appealRepository) {
+            CartRepository cartRepository,
+            StoreRepository storeRepository,
+            ProductRepository productRepository,
+            UnblockAppealRepository appealRepository) {
         this.userRepository = userRepository;
         this.cartRepository = cartRepository;
         this.storeRepository = storeRepository;
@@ -46,7 +46,8 @@ public class UserService {
         if (user.getRole() == Role.STORE_OWNER) {
             storeRepository.findByOwnerId(userId).ifPresent(store -> {
                 Long storeId = store.getId();
-                // Remove cart items across all customer carts that reference this store's products
+                // Remove cart items across all customer carts that reference this store's
+                // products
                 cartRepository.deleteCartItemsByStoreId(storeId);
                 // Unlink store from any carts that reference it
                 cartRepository.unlinkStoreFromCarts(storeId);
