@@ -12,6 +12,8 @@ import toast from 'react-hot-toast';
 import { submitAppeal, getAppealStatus } from '../features/auth/appealApi';
 import Input from '../components/Input';
 import Button from '../components/Button';
+import FormErrorText from '../components/FormErrorText';
+import useRateLimitCountdown from '../hooks/useRateLimitCountdown';
 import { fmtDate, fmtDateTime } from '../utils';
 
 const appealSchema = z.object({
@@ -43,6 +45,10 @@ export default function AppealPage() {
   const [statusError, setStatusError] = useState(null);
   const [statusLoading, setStatusLoading] = useState(false);
 
+  // Rate-limit countdowns (one per tab form)
+  const submitRL = useRateLimitCountdown('rl_appeal_submit');
+  const statusRL = useRateLimitCountdown('rl_appeal_status');
+
   // Form for Submit Appeal
   const {
     register: registerSubmit,
@@ -73,6 +79,7 @@ export default function AppealPage() {
   const onSubmitAppeal = async (data) => {
     setSubmitError(null);
     setSubmitSuccess(null);
+    submitRL.clearRateLimit();
     try {
       const res = await submitAppeal({
         email: data.email.trim(),
@@ -80,12 +87,18 @@ export default function AppealPage() {
         message: data.message.trim(),
       });
       setSubmitSuccess(res.data);
-      // Pre-fill status form in case user switches
       setValueStatus('email', data.email);
       setValueStatus('password', data.password);
       toast.success('Appeal submitted successfully');
     } catch (err) {
+      const status = err.response?.status;
       const respData = err.response?.data;
+      if (status === 429) {
+        const msg = respData?.message || 'Too many attempts. Please wait before trying again.';
+        const retryAfter = err.response?.headers?.['retry-after'] || '';
+        submitRL.startRateLimit(msg, retryAfter);
+        return;
+      }
       if (respData?.errors && typeof respData.errors === 'object') {
         Object.entries(respData.errors).forEach(([field, msg]) => {
           setErrorSubmit(field, { message: msg });
@@ -100,6 +113,7 @@ export default function AppealPage() {
   const onCheckStatus = async (data) => {
     setStatusError(null);
     setStatusResult(null);
+    statusRL.clearRateLimit();
     setStatusLoading(true);
     try {
       const res = await getAppealStatus({
@@ -108,8 +122,15 @@ export default function AppealPage() {
       });
       setStatusResult(res.data);
     } catch (err) {
-      const msg = err.response?.data?.message || 'Failed to retrieve appeal status. Please verify your credentials.';
-      setStatusError(msg);
+      const status = err.response?.status;
+      if (status === 429) {
+        const msg = err.response?.data?.message || 'Too many attempts. Please wait before trying again.';
+        const retryAfter = err.response?.headers?.['retry-after'] || '';
+        statusRL.startRateLimit(msg, retryAfter);
+      } else {
+        const msg = err.response?.data?.message || 'Failed to retrieve appeal status. Please verify your credentials.';
+        setStatusError(msg);
+      }
     } finally {
       setStatusLoading(false);
     }
@@ -254,7 +275,7 @@ export default function AppealPage() {
                       <textarea
                         id="appeal-message"
                         rows={4}
-                        placeholder="Explain why your account should be unblocked and any steps you've taken to comply with LocalKart policies (minimum 20 characters)..."
+                        placeholder="Explain why your account should be unblocked and any steps you&#39;ve taken to comply with LocalKart policies (minimum 20 characters)..."
                         className={`w-full px-4 py-2.5 rounded-xl border text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-green-400 focus:border-transparent placeholder:text-gray-400 ${
                           errorsSubmit.message
                             ? 'border-red-400 bg-red-50'
@@ -265,15 +286,30 @@ export default function AppealPage() {
                       {errorsSubmit.message && (
                         <p className="text-xs text-red-500">{errorsSubmit.message.message}</p>
                       )}
+                      {/* Rate-limit message — shown under the last field before submit */}
+                      {(submitRL.countdown > 0 || submitRL.rateLimitMsg) && (
+                        <FormErrorText
+                          id="appeal-submit-rate-limit"
+                          message={
+                            submitRL.countdown > 0
+                              ? `Too many attempts. Try again in ${submitRL.countdownLabel}`
+                              : submitRL.rateLimitMsg
+                          }
+                        />
+                      )}
                     </div>
 
                     <Button
                       id="appeal-submit-btn"
                       type="submit"
-                      loading={isSubmittingAppeal}
+                      loading={isSubmittingAppeal && submitRL.countdown === 0}
+                      disabled={isSubmittingAppeal || submitRL.countdown > 0}
                       className="w-full mt-2 py-3 text-base"
                     >
-                      <Send size={16} /> Submit Appeal
+                      <Send size={16} />
+                      {submitRL.countdown > 0
+                        ? `Try again in ${submitRL.countdownLabel}`
+                        : 'Submit Appeal'}
                     </Button>
                   </form>
                 )}
@@ -294,23 +330,41 @@ export default function AppealPage() {
                     {...registerStatus('email')}
                   />
 
-                  <Input
-                    id="status-password"
-                    label="Account Password"
-                    type="password"
-                    placeholder="Your password"
-                    autoComplete="current-password"
-                    error={errorsStatus.password?.message}
-                    {...registerStatus('password')}
-                  />
+                  <div>
+                    <Input
+                      id="status-password"
+                      label="Account Password"
+                      type="password"
+                      placeholder="Your password"
+                      autoComplete="current-password"
+                      error={errorsStatus.password?.message}
+                      aria-describedby={statusRL.rateLimitMsg ? 'appeal-status-rate-limit' : undefined}
+                      {...registerStatus('password')}
+                    />
+                    {/* Rate-limit message under the last field before submit */}
+                    {(statusRL.countdown > 0 || statusRL.rateLimitMsg) && (
+                      <FormErrorText
+                        id="appeal-status-rate-limit"
+                        message={
+                          statusRL.countdown > 0
+                            ? `Too many attempts. Try again in ${statusRL.countdownLabel}`
+                            : statusRL.rateLimitMsg
+                        }
+                      />
+                    )}
+                  </div>
 
                   <Button
                     id="status-check-btn"
                     type="submit"
-                    loading={statusLoading}
+                    loading={statusLoading && statusRL.countdown === 0}
+                    disabled={statusLoading || statusRL.countdown > 0}
                     className="w-full py-2.5 text-sm"
                   >
-                    <Search size={16} /> Check Appeal Status
+                    <Search size={16} />
+                    {statusRL.countdown > 0
+                      ? `Try again in ${statusRL.countdownLabel}`
+                      : 'Check Appeal Status'}
                   </Button>
                 </form>
 

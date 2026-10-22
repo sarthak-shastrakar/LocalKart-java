@@ -1,7 +1,9 @@
 package com.example.backend.service;
 
-import com.example.backend.dto.request.*;
+import com.example.backend.dto.request.LoginRequest;
+import com.example.backend.dto.request.RegisterRequest;
 import com.example.backend.dto.response.AuthResponse;
+import com.example.backend.dto.response.AuthResult;
 import com.example.backend.exception.ApiException;
 import com.example.backend.model.Role;
 import com.example.backend.model.User;
@@ -12,10 +14,12 @@ import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
-
-import lombok.RequiredArgsConstructor;
-
 import org.springframework.transaction.annotation.Transactional;
+import com.example.backend.security.LoginAttemptService;
+import org.springframework.security.authentication.BadCredentialsException;
+
+import java.time.Duration;
+import java.time.LocalDateTime;
 
 @Service
 public class AuthService {
@@ -24,19 +28,25 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final AuthenticationManager authenticationManager;
     private final JwtService jwtService;
+    private final RefreshTokenService refreshTokenService;
+    private final LoginAttemptService loginAttempts;
 
     public AuthService(UserRepository userRepository,
             PasswordEncoder passwordEncoder,
             AuthenticationManager authenticationManager,
-            JwtService jwtService) {
+            JwtService jwtService,
+            RefreshTokenService refreshTokenService,
+            LoginAttemptService loginAttempts) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.authenticationManager = authenticationManager;
         this.jwtService = jwtService;
+        this.refreshTokenService = refreshTokenService;
+        this.loginAttempts = loginAttempts;
     }
 
     @Transactional
-    public AuthResponse register(RegisterRequest req) {
+    public AuthResult register(RegisterRequest req) {
         if (req.getRole() == Role.ADMIN) {
             throw new ApiException(HttpStatus.FORBIDDEN, "Cannot register as ADMIN");
         }
@@ -51,25 +61,57 @@ public class AuthService {
         user.setPassword(passwordEncoder.encode(req.getPassword()));
         user.setRole(req.getRole());
         userRepository.save(user);
-        return toResponse(user);
+        return issueFor(user);
     }
 
-    public AuthResponse login(LoginRequest req) {
+    @Transactional
+    public AuthResult login(LoginRequest req) {
         String email = req.getEmail().trim().toLowerCase();
-        authenticationManager.authenticate(
-                new UsernamePasswordAuthenticationToken(email, req.getPassword()));
+        loginAttempts.checkNotLocked(email);
+        try {
+            authenticationManager.authenticate(
+                    new UsernamePasswordAuthenticationToken(email, req.getPassword()));
+        } catch (BadCredentialsException e) {
+            loginAttempts.recordFailure(email);
+            throw e;
+        }
+        loginAttempts.recordSuccess(email);
         User user = userRepository.findByEmail(email)
                 .orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "Invalid credentials"));
-        return toResponse(user);
+        return issueFor(user);
+    }
+
+    // outer transaction pe bhi noRollbackFor, warna reuse-revoke rollback ho jayega
+    @Transactional(noRollbackFor = ApiException.class)
+    public AuthResult refresh(String rawRefreshToken) {
+        RefreshTokenService.Rotated r = refreshTokenService.rotate(rawRefreshToken);
+        return result(r.user(), r.issued());
+    }
+
+    public void logout(String rawRefreshToken) {
+        refreshTokenService.revoke(rawRefreshToken);
+    }
+
+    @Transactional
+    public void logoutAll(String email) {
+        User user = userRepository.findByEmail(email)
+                .orElseThrow(() -> new ApiException(HttpStatus.UNAUTHORIZED, "User not found"));
+        refreshTokenService.revokeAll(user.getId());
+    }
+
+    // ---------- helpers ----------
+    private AuthResult issueFor(User user) {
+        return result(user, refreshTokenService.issue(user));
+    }
+
+    private AuthResult result(User user, RefreshTokenService.Issued issued) {
+        long maxAge = Math.max(
+                Duration.between(LocalDateTime.now(), issued.expiresAt()).getSeconds(), 0);
+        return new AuthResult(toResponse(user), issued.token(), maxAge);
     }
 
     private AuthResponse toResponse(User user) {
-        return new AuthResponse(
-                jwtService.generateToken(user),
-                "Bearer",
-                user.getId(),
-                user.getName(),
-                user.getEmail(),
-                user.getRole().name());
+        return new AuthResponse(jwtService.generateToken(user), "Bearer",
+                user.getId(), user.getName(), user.getEmail(), user.getRole().name());
     }
 }

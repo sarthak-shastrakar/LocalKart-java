@@ -11,6 +11,8 @@ import { loginApi } from '../features/auth/authApi';
 import { setCredentials } from '../features/auth/authSlice';
 import Input from '../components/Input';
 import Button from '../components/Button';
+import FormErrorText from '../components/FormErrorText';
+import useRateLimitCountdown from '../hooks/useRateLimitCountdown';
 
 const SUPPORT_EMAIL = 'support@localkart.com';
 
@@ -31,6 +33,9 @@ export default function LoginPage() {
   const location = useLocation();
   const [blockedMessage, setBlockedMessage] = useState(null);
 
+  const { rateLimitMsg, countdown, countdownLabel, startRateLimit, clearRateLimit } =
+    useRateLimitCountdown('rl_login');
+
   const {
     register,
     handleSubmit,
@@ -41,6 +46,7 @@ export default function LoginPage() {
 
   const onSubmit = async (data) => {
     setBlockedMessage(null);
+    clearRateLimit();
     try {
       const res = await loginApi(data);
       dispatch(setCredentials(res.data));
@@ -59,12 +65,19 @@ export default function LoginPage() {
         setError('password', { message: 'Invalid email or password' });
       } else if (status === 403) {
         setBlockedMessage(err.response?.data?.message || 'Your account has been blocked.');
+      } else if (status === 429) {
+        const msg = err.response?.data?.message || 'Too many attempts. Please wait before trying again.';
+        const retryAfter = err.response?.headers?.['retry-after'] || '';
+        startRateLimit(msg, retryAfter);
       } else {
         const msg = err.response?.data?.message || 'Something went wrong. Please try again.';
         toast.error(msg);
       }
     }
   };
+
+  const isLocked = countdown > 0;
+  const submitDisabled = isSubmitting || isLocked;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-emerald-50 flex items-center justify-center p-4">
@@ -120,23 +133,38 @@ export default function LoginPage() {
                 error={errors.email?.message}
                 {...register('email')}
               />
-              <Input
-                id="login-password"
-                label="Password"
-                type="password"
-                placeholder="Your password"
-                autoComplete="current-password"
-                error={errors.password?.message}
-                {...register('password')}
-              />
+              <div>
+                <Input
+                  id="login-password"
+                  label="Password"
+                  type="password"
+                  placeholder="Your password"
+                  autoComplete="current-password"
+                  error={errors.password?.message}
+                  aria-describedby={rateLimitMsg ? 'login-rate-limit' : undefined}
+                  {...register('password')}
+                />
+                {/* Rate-limit message — shown directly under the password field */}
+                {(isLocked || rateLimitMsg) && (
+                  <FormErrorText
+                    id="login-rate-limit"
+                    message={
+                      isLocked
+                        ? `Too many attempts. Try again in ${countdownLabel}`
+                        : rateLimitMsg
+                    }
+                  />
+                )}
+              </div>
 
               <Button
                 id="login-submit-btn"
                 type="submit"
-                loading={isSubmitting}
+                loading={isSubmitting && !isLocked}
+                disabled={submitDisabled}
                 className="w-full mt-2 py-3 text-base"
               >
-                Sign In
+                {isLocked ? `Try again in ${countdownLabel}` : 'Sign In'}
               </Button>
             </form>
 
@@ -150,9 +178,11 @@ export default function LoginPage() {
         </div>
 
         <p className="text-center text-xs text-gray-400 mt-4">
-          © {new Date().getFullYear()} LocalKart. All rights reserved.
+          &copy; {new Date().getFullYear()} LocalKart. All rights reserved.
         </p>
       </div>
     </div>
   );
 }
+
+

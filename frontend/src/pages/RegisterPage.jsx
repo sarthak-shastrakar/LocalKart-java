@@ -10,6 +10,8 @@ import { registerApi } from '../features/auth/authApi';
 import { setCredentials } from '../features/auth/authSlice';
 import Input from '../components/Input';
 import Button from '../components/Button';
+import FormErrorText from '../components/FormErrorText';
+import useRateLimitCountdown from '../hooks/useRateLimitCountdown';
 
 const schema = z.object({
   name: z.string().min(2, 'Name must be at least 2 characters').max(100),
@@ -32,6 +34,9 @@ export default function RegisterPage() {
   const dispatch = useDispatch();
   const navigate = useNavigate();
 
+  const { rateLimitMsg, countdown, countdownLabel, startRateLimit, clearRateLimit } =
+    useRateLimitCountdown('rl_register');
+
   const {
     register,
     handleSubmit,
@@ -44,6 +49,7 @@ export default function RegisterPage() {
   const selectedRole = watch('role');
 
   const onSubmit = async (data) => {
+    clearRateLimit();
     try {
       const res = await registerApi(data);
       dispatch(setCredentials(res.data));
@@ -58,7 +64,6 @@ export default function RegisterPage() {
         return;
       }
 
-      // Map backend field validation errors onto form fields
       if (status === 400 && body?.errors) {
         Object.entries(body.errors).forEach(([field, message]) => {
           setError(field, { message });
@@ -66,9 +71,19 @@ export default function RegisterPage() {
         return;
       }
 
+      if (status === 429) {
+        const msg = body?.message || 'Too many attempts. Please wait before trying again.';
+        const retryAfter = err.response?.headers?.['retry-after'] || '';
+        startRateLimit(msg, retryAfter);
+        return;
+      }
+
       toast.error(body?.message || 'Something went wrong. Please try again.');
     }
   };
+
+  const isLocked = countdown > 0;
+  const submitDisabled = isSubmitting || isLocked;
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-green-50 via-white to-emerald-50 flex items-center justify-center p-4">
@@ -145,23 +160,38 @@ export default function RegisterPage() {
                 error={errors.phone?.message}
                 {...register('phone')}
               />
-              <Input
-                id="register-password"
-                label="Password (min 8 characters)"
-                type="password"
-                placeholder="Create a strong password"
-                autoComplete="new-password"
-                error={errors.password?.message}
-                {...register('password')}
-              />
+              <div>
+                <Input
+                  id="register-password"
+                  label="Password (min 8 characters)"
+                  type="password"
+                  placeholder="Create a strong password"
+                  autoComplete="new-password"
+                  error={errors.password?.message}
+                  aria-describedby={rateLimitMsg ? 'register-rate-limit' : undefined}
+                  {...register('password')}
+                />
+                {/* Rate-limit message — shown under the last field before submit */}
+                {(isLocked || rateLimitMsg) && (
+                  <FormErrorText
+                    id="register-rate-limit"
+                    message={
+                      isLocked
+                        ? `Too many attempts. Try again in ${countdownLabel}`
+                        : rateLimitMsg
+                    }
+                  />
+                )}
+              </div>
 
               <Button
                 id="register-submit-btn"
                 type="submit"
-                loading={isSubmitting}
+                loading={isSubmitting && !isLocked}
+                disabled={submitDisabled}
                 className="w-full mt-2 py-3 text-base"
               >
-                Create Account
+                {isLocked ? `Try again in ${countdownLabel}` : 'Create Account'}
               </Button>
             </form>
 

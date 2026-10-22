@@ -8,8 +8,11 @@ const roleHome = {
 };
 
 export default function ProtectedRoute({ children, allowedRoles }) {
-  const { token, user } = useSelector((s) => s.auth);
+  const { token, user, loading } = useSelector((s) => s.auth);
   const location = useLocation();
+
+  // While app-init refresh is in flight, render nothing — AppInit shows the spinner.
+  if (loading) return null;
 
   if (!token) {
     return <Navigate to="/login" state={{ from: location }} replace />;

@@ -5,17 +5,19 @@ import toast from 'react-hot-toast';
 import {
   User, Mail, Shield, Store, MapPin, Package,
   ExternalLink, LogOut, Trash2, AlertTriangle, CheckCircle2,
-  Clock, XCircle, Camera, Loader2
+  Clock, XCircle, Camera, Loader2, MonitorSmartphone
 } from 'lucide-react';
 
 import { clearAuth, setUser } from '../features/auth/authSlice';
 import { resetCart } from '../features/cart/cartSlice';
-import { deleteAccountApi } from '../features/auth/authApi';
+import { deleteAccountApi, logoutApi, deleteSessionsApi } from '../features/auth/authApi';
 import { getMyStore } from '../features/owner/ownerStoreApi';
 import { uploadProfilePhoto, deleteProfilePhoto } from '../features/uploads/uploadApi';
 import Modal from '../components/Modal';
 import Button from '../components/Button';
 import Avatar from '../components/Avatar';
+
+const authChannel = new BroadcastChannel('auth');
 
 export default function ProfilePage() {
   const { user } = useSelector((s) => s.auth);
@@ -29,6 +31,11 @@ export default function ProfilePage() {
   // Delete account confirmation modal
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+
+  // Logout states
+  const [loggingOut, setLoggingOut] = useState(false);
+  const [allDevicesModal, setAllDevicesModal] = useState(false);
+  const [loggingOutAll, setLoggingOutAll] = useState(false);
 
   // Profile photo state
   const fileInputRef = useRef(null);
@@ -84,9 +91,35 @@ export default function ProfilePage() {
     }
   }, [user]);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    try {
+      await logoutApi();
+    } catch {
+      // Network errors are intentionally ignored
+    } finally {
+      setLoggingOut(false);
+    }
+    authChannel.postMessage('logout');
     dispatch(clearAuth());
-    toast.success('Logged out successfully');
+    dispatch(resetCart());
+    navigate('/login');
+  };
+
+  const handleLogoutAllDevices = async () => {
+    setLoggingOutAll(true);
+    try {
+      await deleteSessionsApi();
+    } catch (err) {
+      toast.error(err.response?.data?.message || 'Failed to log out from all devices');
+      setLoggingOutAll(false);
+      setAllDevicesModal(false);
+      return;
+    }
+    authChannel.postMessage('logout');
+    dispatch(clearAuth());
+    dispatch(resetCart());
     navigate('/login');
   };
 
@@ -220,10 +253,11 @@ export default function ProfilePage() {
 
           <button
             onClick={handleLogout}
-            className="mt-2 sm:mt-0 flex items-center gap-1.5 px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold backdrop-blur border border-white/20 transition"
+            disabled={loggingOut}
+            className="mt-2 sm:mt-0 flex items-center gap-1.5 px-4 py-2 rounded-xl bg-white/10 hover:bg-white/20 text-white text-xs font-semibold backdrop-blur border border-white/20 transition disabled:opacity-50 disabled:cursor-not-allowed"
           >
             <LogOut size={14} />
-            Sign Out
+            {loggingOut ? 'Signing out…' : 'Sign Out'}
           </button>
         </div>
       </div>
@@ -373,6 +407,31 @@ export default function ProfilePage() {
         </div>
       )}
 
+      {/* Security: Log out from all devices */}
+      <div className="bg-white rounded-2xl border border-orange-100 shadow-sm p-6 space-y-4">
+        <h2 className="text-base font-bold text-orange-600 border-b border-orange-50 pb-3 flex items-center gap-2">
+          <MonitorSmartphone size={18} />
+          Session Management
+        </h2>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div>
+            <h3 className="font-semibold text-gray-800 text-sm">Log out from all devices</h3>
+            <p className="text-xs text-gray-500 mt-0.5">
+              Revokes all active sessions everywhere, including this device.
+            </p>
+          </div>
+          <Button
+            id="profile-logout-all-btn"
+            type="button"
+            onClick={() => setAllDevicesModal(true)}
+            className="self-start sm:self-auto bg-orange-500 hover:bg-orange-600 text-white flex items-center gap-1.5 px-4 py-2 text-sm"
+          >
+            <LogOut size={15} />
+            Log Out All Devices
+          </Button>
+        </div>
+      </div>
+
       {/* Danger Zone: Account Deletion */}
       <div className="bg-white rounded-2xl border border-red-100 shadow-sm p-6 space-y-4">
         <h2 className="text-base font-bold text-red-600 border-b border-red-50 pb-3 flex items-center gap-2">
@@ -400,6 +459,45 @@ export default function ProfilePage() {
           </Button>
         </div>
       </div>
+
+      {/* Log out from all devices modal */}
+      {allDevicesModal && (
+        <Modal
+          title="Log Out From All Devices"
+          onClose={() => !loggingOutAll && setAllDevicesModal(false)}
+          maxWidth="max-w-md"
+        >
+          <div className="space-y-4">
+            <div className="flex items-start gap-3 p-4 bg-orange-50 text-orange-800 rounded-xl border border-orange-100">
+              <AlertTriangle size={22} className="text-orange-500 flex-shrink-0 mt-0.5" />
+              <div className="text-sm">
+                <p className="font-bold">You will be signed out everywhere, including this device.</p>
+                <p className="text-xs text-orange-600 mt-1 leading-relaxed">
+                  All active sessions on all browsers and devices will be terminated immediately.
+                </p>
+              </div>
+            </div>
+            <div className="flex items-center justify-end gap-3 pt-2">
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={() => setAllDevicesModal(false)}
+                disabled={loggingOutAll}
+              >
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                onClick={handleLogoutAllDevices}
+                loading={loggingOutAll}
+                className="bg-orange-500 hover:bg-orange-600 text-white"
+              >
+                Yes, Log Out Everywhere
+              </Button>
+            </div>
+          </div>
+        </Modal>
+      )}
 
       {/* Delete Account Confirmation Modal */}
       {deleteModalOpen && (

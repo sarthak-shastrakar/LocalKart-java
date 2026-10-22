@@ -11,7 +11,6 @@ import { getNearbyStores } from '../features/stores/storeApi';
 import { getAllProducts } from '../features/products/productApi';
 import { StoreCardSkeleton, ProductCardSkeleton } from '../components/Skeleton';
 import Button from '../components/Button';
-import Input from '../components/Input';
 import Pagination from '../components/Pagination';
 import ProductDetailModal from '../components/ProductDetailModal';
 import CardImageCarousel from '../components/CardImageCarousel';
@@ -21,6 +20,8 @@ import { categoryBadge, fmtTime, inr } from '../utils';
 import { formatDistance } from '../utils/formatDistance';
 
 const RADIUS_OPTIONS = [1, 3, 5, 10];
+const DEFAULT_LAT = 21.1458;
+const DEFAULT_LNG = 79.0882;
 
 // ─── Sort options ───────────────────────────────────────────────
 const SORT_OPTIONS = [
@@ -223,8 +224,6 @@ export default function HomePage() {
   const [storesLoading, setStoresLoading] = useState(false);
   const [storesError, setStoresError] = useState(null);
   const [radius, setRadius] = useState(5);
-  const [manualLat, setManualLat] = useState('21.1458');
-  const [manualLng, setManualLng] = useState('79.0882');
 
   // Sort
   const [storeSort, setStoreSort] = useState('nearest');
@@ -287,28 +286,17 @@ export default function HomePage() {
     if (position) {
       fetchStores(position.lat, position.lng, radius);
     } else {
-      fetchStores(parseFloat(manualLat), parseFloat(manualLng), radius);
+      fetchStores(DEFAULT_LAT, DEFAULT_LNG, radius);
     }
   }, [position]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const handleUseLocation = () => getPosition();
 
-  const handleManualSearch = (e) => {
-    e.preventDefault();
-    const lat = parseFloat(manualLat);
-    const lng = parseFloat(manualLng);
-    if (isNaN(lat) || isNaN(lng) || lat < -90 || lat > 90 || lng < -180 || lng > 180) {
-      toast.error('Please enter valid latitude and longitude.');
-      return;
-    }
-    fetchStores(lat, lng, radius);
-  };
-
   const handleRadiusChange = (r) => {
     setRadius(r);
-    const lat = position?.lat ?? parseFloat(manualLat);
-    const lng = position?.lng ?? parseFloat(manualLng);
-    if (!isNaN(lat) && !isNaN(lng)) fetchStores(lat, lng, r);
+    const lat = position?.lat ?? DEFAULT_LAT;
+    const lng = position?.lng ?? DEFAULT_LNG;
+    fetchStores(lat, lng, r);
   };
 
   return (
@@ -453,46 +441,39 @@ export default function HomePage() {
       {/* ── TAB 2: NEARBY STORES ────────────────────────── */}
       {activeTab === 'stores' && (
         <div className="space-y-6">
-          {/* Controls row */}
-          <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-end">
-            {/* Manual lat/lng */}
-            <form onSubmit={handleManualSearch} className="flex flex-col sm:flex-row gap-2 flex-1">
-              <div className="flex gap-2 flex-1">
-                <Input
-                  id="manual-lat"
-                  label="Latitude"
-                  type="number"
-                  step="any"
-                  placeholder="21.1458"
-                  value={manualLat}
-                  onChange={(e) => setManualLat(e.target.value)}
-                  className="flex-1"
-                />
-                <Input
-                  id="manual-lng"
-                  label="Longitude"
-                  type="number"
-                  step="any"
-                  placeholder="79.0882"
-                  value={manualLng}
-                  onChange={(e) => setManualLng(e.target.value)}
-                  className="flex-1"
-                />
-              </div>
+          {/* Controls bar */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 p-4 bg-white rounded-2xl border border-gray-100 shadow-sm">
+            {/* GPS Location button & status */}
+            <div className="flex flex-wrap items-center gap-3">
               <Button
-                id="manual-search-btn"
-                type="submit"
-                variant="secondary"
-                className="self-end sm:self-auto whitespace-nowrap"
+                id="use-location-btn"
+                onClick={handleUseLocation}
+                loading={geoLoading}
+                variant={position ? "secondary" : "outline"}
+                className={`text-sm gap-2 rounded-xl transition ${
+                  position
+                    ? 'bg-green-50 text-green-700 border border-green-300 hover:bg-green-100'
+                    : 'text-green-700 border-green-300 hover:bg-green-50'
+                }`}
               >
-                <Search size={15} />
-                Search
+                <Navigation size={15} />
+                {position ? 'Update GPS Location' : 'Use My Current GPS Location'}
               </Button>
-            </form>
+              {position && (
+                <span className="text-xs text-green-700 font-semibold bg-green-50 px-3 py-1.5 rounded-full border border-green-200 flex items-center gap-1.5 shadow-xs">
+                  <CheckCircle size={13} className="text-green-600" /> GPS Active
+                </span>
+              )}
+              {geoError && (
+                <p className="text-xs text-red-500 flex items-center gap-1 font-medium">
+                  <AlertCircle size={13} /> {geoError}
+                </p>
+              )}
+            </div>
 
             {/* Radius selector */}
-            <div className="space-y-1.5 shrink-0">
-              <label className="block text-sm font-medium text-gray-700">Radius</label>
+            <div className="flex items-center gap-2.5">
+              <span className="text-sm font-semibold text-gray-700">Radius:</span>
               <div className="flex gap-1.5">
                 {RADIUS_OPTIONS.map((r) => (
                   <button
@@ -500,9 +481,9 @@ export default function HomePage() {
                     id={`radius-${r}km-btn`}
                     type="button"
                     onClick={() => handleRadiusChange(r)}
-                    className={`px-3 py-2 rounded-xl text-sm font-semibold transition-all border
+                    className={`px-3 py-1.5 rounded-xl text-sm font-semibold transition-all border
                       ${radius === r
-                        ? 'bg-green-600 text-white border-green-600'
+                        ? 'bg-green-600 text-white border-green-600 shadow-sm'
                         : 'bg-white text-gray-600 border-gray-200 hover:border-green-400 hover:text-green-600'}`}
                   >
                     {r} km
@@ -510,25 +491,6 @@ export default function HomePage() {
                 ))}
               </div>
             </div>
-          </div>
-
-          {/* GPS / error row */}
-          <div className="flex items-center gap-3">
-            <Button
-              id="use-location-btn"
-              onClick={handleUseLocation}
-              loading={geoLoading}
-              variant="outline"
-              className="text-xs text-green-700 border-green-300 hover:bg-green-50 gap-1.5"
-            >
-              <Navigation size={13} />
-              Use My Current GPS Location
-            </Button>
-            {geoError && (
-              <p className="text-xs text-red-500 flex items-center gap-1">
-                <AlertCircle size={12} /> {geoError}
-              </p>
-            )}
           </div>
 
           {/* Result count + sort controls */}
@@ -580,8 +542,8 @@ export default function HomePage() {
               <button
                 type="button"
                 onClick={() => {
-                  const lat = position?.lat ?? parseFloat(manualLat);
-                  const lng = position?.lng ?? parseFloat(manualLng);
+                  const lat = position?.lat ?? DEFAULT_LAT;
+                  const lng = position?.lng ?? DEFAULT_LNG;
                   fetchStores(lat, lng, radius);
                 }}
                 className="text-sm text-green-600 font-semibold hover:underline"
@@ -597,7 +559,7 @@ export default function HomePage() {
               <Navigation size={48} className="text-gray-300" />
               <h3 className="text-lg font-semibold text-gray-500">Find your nearby stores</h3>
               <p className="text-sm text-gray-400 max-w-xs">
-                Click &ldquo;Use My Current GPS Location&rdquo; or search coordinates above.
+                Click &ldquo;Use My Current GPS Location&rdquo; to find stores near you.
               </p>
             </div>
           )}

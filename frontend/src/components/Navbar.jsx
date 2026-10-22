@@ -3,10 +3,13 @@ import { Link, NavLink, useNavigate } from 'react-router-dom';
 import { useDispatch, useSelector } from 'react-redux';
 import { clearAuth } from '../features/auth/authSlice';
 import { resetCart } from '../features/cart/cartSlice';
+import { logoutApi } from '../features/auth/authApi';
 import { getPendingAppealCounts } from '../features/admin/appealAdminApi';
 import { ShoppingBag, ShoppingCart, Menu, X, Store, ShieldCheck, LogOut, User } from 'lucide-react';
 import Avatar from './Avatar';
 import toast from 'react-hot-toast';
+
+const authChannel = new BroadcastChannel('auth');
 
 const roleLinks = {
   CUSTOMER: [
@@ -36,6 +39,7 @@ export default function Navbar() {
   const dispatch = useDispatch();
   const navigate = useNavigate();
   const [open, setOpen] = useState(false);
+  const [loggingOut, setLoggingOut] = useState(false);
   const [pendingAppealsCount, setPendingAppealsCount] = useState(0);
 
   const fetchAppealsCount = useCallback(async () => {
@@ -55,10 +59,20 @@ export default function Navbar() {
     return () => window.removeEventListener('appeal-updated', handleUpdate);
   }, [fetchAppealsCount]);
 
-  const handleLogout = () => {
+  const handleLogout = async () => {
+    if (loggingOut) return;
+    setLoggingOut(true);
+    try {
+      await logoutApi();
+    } catch {
+      // Network errors are intentionally ignored — we still clear state
+    } finally {
+      setLoggingOut(false);
+    }
+    // Notify other tabs before clearing state so they receive the message
+    authChannel.postMessage('logout');
     dispatch(clearAuth());
     dispatch(resetCart());
-    toast.success('Logged out successfully');
     navigate('/login');
   };
 
@@ -140,10 +154,11 @@ export default function Navbar() {
               <button
                 id="navbar-logout-btn"
                 onClick={handleLogout}
-                className="flex items-center gap-1.5 text-sm font-medium text-red-500 hover:text-red-700 transition-colors"
+                disabled={loggingOut}
+                className="flex items-center gap-1.5 text-sm font-medium text-red-500 hover:text-red-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               >
                 <LogOut size={15} />
-                Logout
+                {loggingOut ? 'Signing out…' : 'Logout'}
               </button>
             </>
           ) : (
@@ -233,9 +248,10 @@ export default function Navbar() {
           {user ? (
             <button
               onClick={() => { setOpen(false); handleLogout(); }}
-              className="flex items-center gap-2 py-2 text-sm font-medium text-red-500"
+              disabled={loggingOut}
+              className="flex items-center gap-2 py-2 text-sm font-medium text-red-500 disabled:opacity-50"
             >
-              <LogOut size={15} /> Logout ({user.name})
+              <LogOut size={15} /> {loggingOut ? 'Signing out…' : `Logout (${user.name})`}
             </button>
           ) : (
             <Link to="/login" onClick={() => setOpen(false)} className="block py-2 text-sm font-medium text-green-600">

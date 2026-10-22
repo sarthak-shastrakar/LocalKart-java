@@ -19,11 +19,14 @@ public class AdminUserService {
 
     private final UserRepository userRepository;
     private final UnblockAppealRepository appealRepository;
+    private final RefreshTokenService refreshTokenService;
 
     public AdminUserService(UserRepository userRepository,
-            UnblockAppealRepository appealRepository) {
+            UnblockAppealRepository appealRepository,
+            RefreshTokenService refreshTokenService) {
         this.userRepository = userRepository;
         this.appealRepository = appealRepository;
+        this.refreshTokenService = refreshTokenService;
     }
 
     @Transactional(readOnly = true)
@@ -57,7 +60,10 @@ public class AdminUserService {
                 : req.getReason();
         String note = (req == null) ? null : req.getNote();
         target.markBlocked(admin.getId(), reason, note);
-        return toSummary(userRepository.save(target));
+        refreshTokenService.revokeAll(target.getId());
+        User saved = userRepository.save(target);
+        refreshTokenService.revokeAll(target.getId());
+        return toSummary(saved);
     }
 
     @Transactional
@@ -67,7 +73,6 @@ public class AdminUserService {
         target.clearBlock();
         userRepository.save(target);
 
-        // direct unblock ho gaya to pending appeal bhi band karo
         for (UnblockAppeal a : appealRepository.findByUserIdAndStatus(userId, AppealStatus.PENDING)) {
             a.setStatus(AppealStatus.APPROVED);
             a.setReviewedBy(admin);
