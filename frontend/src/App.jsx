@@ -69,7 +69,7 @@ function AppInit({ children }) {
         // Do NOT call logout API — other tab already did it
         dispatch(clearAuth());
         dispatch(resetCart());
-        window.location.href = '/login';
+        window.location.href = '/';
       }
     };
     authChannel.addEventListener('message', handleAuthMessage);

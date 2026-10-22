@@ -73,7 +73,7 @@ export default function Navbar() {
     authChannel.postMessage('logout');
     dispatch(clearAuth());
     dispatch(resetCart());
-    navigate('/login');
+    navigate('/');
   };
 
   const links = user ? (roleLinks[user.role] || []) : [];

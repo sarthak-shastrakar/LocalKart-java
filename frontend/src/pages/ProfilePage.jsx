@@ -16,6 +16,7 @@ import { uploadProfilePhoto, deleteProfilePhoto } from '../features/uploads/uplo
 import Modal from '../components/Modal';
 import Button from '../components/Button';
 import Avatar from '../components/Avatar';
+import Input from '../components/Input';
 
 const authChannel = new BroadcastChannel('auth');
 
@@ -31,6 +32,9 @@ export default function ProfilePage() {
   // Delete account confirmation modal
   const [deleteModalOpen, setDeleteModalOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deleteConfirmText, setDeleteConfirmText] = useState('');
+  const [deleteError, setDeleteError] = useState('');
 
   // Logout states
   const [loggingOut, setLoggingOut] = useState(false);
@@ -104,7 +108,7 @@ export default function ProfilePage() {
     authChannel.postMessage('logout');
     dispatch(clearAuth());
     dispatch(resetCart());
-    navigate('/login');
+    navigate('/');
   };
 
   const handleLogoutAllDevices = async () => {
@@ -120,20 +124,50 @@ export default function ProfilePage() {
     authChannel.postMessage('logout');
     dispatch(clearAuth());
     dispatch(resetCart());
-    navigate('/login');
+    navigate('/');
   };
 
-  const handleDeleteAccount = async () => {
+  const openDeleteModal = () => {
+    setDeletePassword('');
+    setDeleteConfirmText('');
+    setDeleteError('');
+    setDeleteModalOpen(true);
+  };
+
+  const closeDeleteModal = () => {
+    if (deleting) return;
+    setDeleteModalOpen(false);
+    setDeletePassword('');
+    setDeleteConfirmText('');
+    setDeleteError('');
+  };
+
+  const canConfirmDelete = Boolean(deletePassword.trim()) && deleteConfirmText === 'DELETE';
+
+  const handleDeleteAccount = async (e) => {
+    if (e) e.preventDefault();
+    if (!canConfirmDelete || deleting) return;
+
     setDeleting(true);
+    setDeleteError('');
     try {
-      await deleteAccountApi();
+      await deleteAccountApi(deletePassword);
+      authChannel.postMessage('logout');
       dispatch(clearAuth());
       dispatch(resetCart());
-      toast.success('Your account and all associated data have been permanently deleted.');
-      setDeleteModalOpen(false);
+      try {
+        localStorage.removeItem('lk_user');
+      } catch {}
+      closeDeleteModal();
       navigate('/login');
+      toast.success('Your account was deleted.');
     } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed to delete account');
+      const msg =
+        err.response?.data?.message ||
+        (typeof err.response?.data === 'string' ? err.response?.data : null) ||
+        (err.response?.data?.errors ? Object.values(err.response?.data.errors).join(', ') : null) ||
+        'Failed to delete account. Please try again.';
+      setDeleteError(msg);
     } finally {
       setDeleting(false);
     }
@@ -443,7 +477,7 @@ export default function ProfilePage() {
           <div>
             <h3 className="font-semibold text-gray-800 text-sm">Delete Account</h3>
             <p className="text-xs text-gray-500 mt-0.5">
-              Permanently close and delete your account from this device.
+              Permanently delete your account and all associated data.
             </p>
           </div>
 
@@ -451,7 +485,7 @@ export default function ProfilePage() {
             id="profile-delete-account-btn"
             type="button"
             variant="danger"
-            onClick={() => setDeleteModalOpen(true)}
+            onClick={openDeleteModal}
             className="self-start sm:self-auto bg-red-600 hover:bg-red-700 text-white flex items-center gap-1.5 px-4 py-2 text-sm"
           >
             <Trash2 size={15} />
@@ -503,39 +537,78 @@ export default function ProfilePage() {
       {deleteModalOpen && (
         <Modal
           title="Delete Account"
-          onClose={() => !deleting && setDeleteModalOpen(false)}
+          onClose={closeDeleteModal}
           maxWidth="max-w-md"
         >
-          <div className="space-y-4">
+          <form onSubmit={handleDeleteAccount} className="space-y-4">
             <div className="flex items-start gap-3 p-4 bg-red-50 text-red-800 rounded-xl border border-red-100">
               <AlertTriangle size={22} className="text-red-500 flex-shrink-0 mt-0.5" />
-              <div className="text-sm">
-                <p className="font-bold">Are you sure you want to permanently delete your account?</p>
-                <p className="text-xs text-red-600 mt-1 leading-relaxed">
-                  This action is permanent and cannot be undone. All your personal data, along with your stores, products, appeals, and cart items will be completely removed from the database.
-                </p>
+              <p className="text-xs sm:text-sm text-red-700 leading-relaxed font-medium">
+                This permanently deletes your account and data: profile, sessions, and, if you are a store owner, your store and all its products. This cannot be undone.
+              </p>
+            </div>
+
+            <div className="space-y-3 pt-1">
+              <div>
+                <Input
+                  id="delete-account-password"
+                  label="Password"
+                  type="password"
+                  placeholder="Enter your password"
+                  value={deletePassword}
+                  onChange={(e) => {
+                    setDeletePassword(e.target.value);
+                    if (deleteError) setDeleteError('');
+                  }}
+                  error={deleteError}
+                  disabled={deleting}
+                  required
+                  autoComplete="current-password"
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label
+                  htmlFor="delete-account-confirm-text"
+                  className="block text-sm font-medium text-gray-700"
+                >
+                  Type <span className="font-mono font-bold text-red-600 select-all">DELETE</span> to confirm
+                </label>
+                <input
+                  id="delete-account-confirm-text"
+                  type="text"
+                  placeholder="DELETE"
+                  value={deleteConfirmText}
+                  onChange={(e) => setDeleteConfirmText(e.target.value)}
+                  disabled={deleting}
+                  required
+                  autoComplete="off"
+                  className="w-full px-4 py-2.5 rounded-xl border border-gray-200 bg-white text-sm transition-colors focus:outline-none focus:ring-2 focus:ring-red-400 focus:border-transparent placeholder:text-gray-400 hover:border-gray-300 disabled:bg-gray-100 disabled:cursor-not-allowed"
+                />
               </div>
             </div>
 
-            <div className="flex items-center justify-end gap-3 pt-2">
+            <div className="flex items-center justify-end gap-3 pt-3 border-t border-gray-100">
               <Button
                 type="button"
                 variant="secondary"
-                onClick={() => setDeleteModalOpen(false)}
+                onClick={closeDeleteModal}
                 disabled={deleting}
               >
                 Cancel
               </Button>
               <Button
-                type="button"
-                onClick={handleDeleteAccount}
+                id="confirm-delete-account-btn"
+                type="submit"
+                variant="danger"
+                disabled={!canConfirmDelete || deleting}
                 loading={deleting}
                 className="bg-red-600 hover:bg-red-700 text-white"
               >
-                Yes, Delete My Account
+                Delete Account
               </Button>
             </div>
-          </div>
+          </form>
         </Modal>
       )}
     </div>

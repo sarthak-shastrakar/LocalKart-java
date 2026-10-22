@@ -5,6 +5,9 @@ import com.example.backend.model.UnblockAppeal;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 
 import java.util.List;
 import java.util.Optional;
@@ -26,4 +29,8 @@ public interface UnblockAppealRepository extends JpaRepository<UnblockAppeal, Lo
     long countByStatusAndAssignedAdminId(AppealStatus status, Long adminId);
 
     void deleteByUserId(Long userId);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("delete from UnblockAppeal a where a.user.id = :userId")
+    int deleteAllByUser(@Param("userId") Long userId);
 }

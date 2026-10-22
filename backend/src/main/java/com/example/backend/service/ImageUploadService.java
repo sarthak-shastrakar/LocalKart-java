@@ -9,6 +9,14 @@ import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+
+import java.util.Collection;
+import java.util.List;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 import java.io.IOException;
 import java.util.Map;
 
@@ -16,6 +24,7 @@ import java.util.Map;
 public class ImageUploadService {
 
     private static final long MAX_BYTES = 10L * 1024 * 1024;
+    private static final Logger log = LoggerFactory.getLogger(ImageUploadService.class);
 
     private final Cloudinary cloudinary;
     private final String cloudName;
@@ -81,5 +90,58 @@ public class ImageUploadService {
         boolean webp = b[0] == 'R' && b[1] == 'I' && b[2] == 'F' && b[3] == 'F'
                 && b[8] == 'W' && b[9] == 'E' && b[10] == 'B' && b[11] == 'P';
         return jpeg || png || webp;
+    }
+
+    // URL se Cloudinary public id, sirf hamare "localkart/" folder ki images ke
+    // liye
+    public String publicIdFromUrl(String url) {
+        if (!isOurImage(url))
+            return null;
+        int i = url.indexOf("/upload/");
+        if (i < 0)
+            return null;
+        String rest = url.substring(i + "/upload/".length());
+        int q = rest.indexOf('?');
+        if (q >= 0)
+            rest = rest.substring(0, q);
+        rest = rest.replaceFirst("^v\\d+/", ""); // version hatao
+        int dot = rest.lastIndexOf('.');
+        if (dot > rest.lastIndexOf('/'))
+            rest = rest.substring(0, dot); // extension hatao
+        return rest.startsWith("localkart/") ? rest : null;
+    }
+
+    // best-effort: ek fail ho to baaki chalte rahein, exception bahar nahi jata
+    public void deleteQuietly(Collection<String> urls) {
+        for (String url : urls) {
+            String publicId = publicIdFromUrl(url);
+            if (publicId == null)
+                continue;
+            try {
+                cloudinary.uploader().destroy(publicId, ObjectUtils.asMap(
+                        "resource_type", "image",
+                        "invalidate", true));
+            } catch (Exception e) {
+                log.warn("Could not delete Cloudinary image {}: {}", publicId, e.getMessage());
+            }
+        }
+    }
+
+    // DB commit ke BAAD hi Cloudinary se hatao, taaki save fail ho to images na
+    // udein
+    public void deleteAfterCommit(Collection<String> urls) {
+        if (urls == null || urls.isEmpty())
+            return;
+        List<String> copy = List.copyOf(urls);
+        if (TransactionSynchronizationManager.isSynchronizationActive()) {
+            TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+                @Override
+                public void afterCommit() {
+                    deleteQuietly(copy);
+                }
+            });
+        } else {
+            deleteQuietly(copy);
+        }
     }
 }

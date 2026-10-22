@@ -1,15 +1,14 @@
 import { useState, useEffect, useCallback } from 'react';
 import toast from 'react-hot-toast';
 import {
-  Package, Plus, Pencil, Trash2, Check, AlertTriangle,
-  RefreshCw, CheckCircle2, XCircle
+  Package, Plus, Pencil, Trash2, AlertTriangle,
+  RefreshCw
 } from 'lucide-react';
 
 import {
   getMyProducts,
   createProduct,
   updateProduct,
-  updateStock,
   deleteProduct
 } from '../features/owner/ownerProductApi';
 
@@ -36,10 +35,6 @@ export default function OwnerProductsPage() {
   const [formSubmitting, setFormSubmitting] = useState(false);
   const [deleteSubmitting, setDeleteSubmitting] = useState(false);
 
-  // Inline stock edits: { [productId]: number }
-  const [stockEdits, setStockEdits] = useState({});
-  const [stockUpdatingId, setStockUpdatingId] = useState(null);
-
   const fetchProducts = useCallback(async (pageToLoad = 0) => {
     setLoading(true);
     try {
@@ -48,13 +43,6 @@ export default function OwnerProductsPage() {
       setPage(res.data.page ?? pageToLoad);
       setTotalPages(res.data.totalPages ?? 0);
       setTotalItems(res.data.totalItems ?? 0);
-
-      // Pre-fill stock edit state
-      const initialStock = {};
-      (res.data.items || []).forEach((p) => {
-        initialStock[p.id] = p.stock;
-      });
-      setStockEdits(initialStock);
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to load products');
     } finally {
@@ -109,36 +97,17 @@ export default function OwnerProductsPage() {
     }
   };
 
-  // Handle Quick Stock Update
-  const handleStockSave = async (id) => {
-    const newStock = stockEdits[id];
-    if (newStock === undefined || newStock === '' || Number(newStock) < 0) {
-      toast.error('Please enter a valid stock quantity');
-      return;
-    }
-    setStockUpdatingId(id);
-    try {
-      await updateStock(id, parseInt(newStock, 10));
-      toast.success('Stock updated');
-      setProducts((prev) =>
-        prev.map((p) => (p.id === id ? { ...p, stock: parseInt(newStock, 10) } : p))
-      );
-    } catch (err) {
-      toast.error(err.response?.data?.message || 'Failed to update stock');
-    } finally {
-      setStockUpdatingId(null);
-    }
-  };
-
   // Handle Delete (soft delete)
   const handleDeleteConfirm = async () => {
     if (!deletingProduct) return;
+    const deletedId = deletingProduct.id;
     setDeleteSubmitting(true);
     try {
-      await deleteProduct(deletingProduct.id);
+      await deleteProduct(deletedId);
       toast.success('Product deleted');
       setDeletingProduct(null);
-      fetchProducts(page);
+      setProducts((prev) => prev.filter((p) => p.id !== deletedId));
+      setTotalItems((prev) => Math.max(0, prev - 1));
     } catch (err) {
       toast.error(err.response?.data?.message || 'Failed to delete product');
     } finally {
@@ -232,8 +201,7 @@ export default function OwnerProductsPage() {
                 <tr className="bg-gray-50 border-b border-gray-100 text-xs font-semibold text-gray-500 uppercase tracking-wider">
                   <th className="py-3.5 px-4 sm:px-6">Product</th>
                   <th className="py-3.5 px-4">Price</th>
-                  <th className="py-3.5 px-4">Status</th>
-                  <th className="py-3.5 px-4">Stock Management</th>
+                  <th className="py-3.5 px-4">Stock</th>
                   <th className="py-3.5 px-4 sm:px-6 text-right">Actions</th>
                 </tr>
               </thead>
@@ -241,14 +209,11 @@ export default function OwnerProductsPage() {
                 {products.map((p) => {
                   const isLowStock = p.stock > 0 && p.stock <= 5;
                   const isOutOfStock = p.stock === 0;
-                  const isInactive = !p.active;
 
                   return (
                     <tr
                       key={p.id}
-                      className={`transition-colors hover:bg-gray-50/70 ${
-                        isInactive ? 'opacity-60 bg-gray-50/40' : ''
-                      }`}
+                      className="transition-colors hover:bg-gray-50/70"
                     >
                       {/* Product details */}
                       <td className="py-4 px-4 sm:px-6">
@@ -291,70 +256,24 @@ export default function OwnerProductsPage() {
                         {inr(p.price)}
                       </td>
 
-                      {/* Status */}
+                      {/* Stock */}
                       <td className="py-4 px-4 whitespace-nowrap">
-                        {isInactive ? (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-gray-100 text-gray-500">
-                            <XCircle size={13} />
-                            Inactive
-                          </span>
-                        ) : (
-                          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-green-100 text-green-700">
-                            <CheckCircle2 size={13} />
-                            Active
-                          </span>
-                        )}
-                      </td>
-
-                      {/* Stock Inline Quick Update */}
-                      <td className="py-4 px-4">
-                        <div className="space-y-1.5">
-                          <div className="flex items-center gap-2">
-                            {isOutOfStock ? (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-semibold bg-red-100 text-red-700">
-                                <AlertTriangle size={12} />
-                                Out of stock
-                              </span>
-                            ) : isLowStock ? (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-semibold bg-amber-100 text-amber-700">
-                                <AlertTriangle size={12} />
-                                Low stock ({p.stock})
-                              </span>
-                            ) : (
-                              <span className="text-xs text-gray-500 font-medium">
-                                In stock ({p.stock})
-                              </span>
-                            )}
-                          </div>
-
-                          {/* Inline Stock Input + Save */}
-                          <div className="flex items-center gap-1.5">
-                            <input
-                              type="number"
-                              min="0"
-                              aria-label={`Stock for ${p.name}`}
-                              value={stockEdits[p.id] ?? p.stock}
-                              onChange={(e) =>
-                                setStockEdits((prev) => ({
-                                  ...prev,
-                                  [p.id]: e.target.value,
-                                }))
-                              }
-                              className="w-20 px-2.5 py-1 text-xs rounded-lg border border-gray-200 focus:outline-none focus:ring-1 focus:ring-green-400 focus:border-green-400 bg-white"
-                            />
-                            <button
-                              type="button"
-                              onClick={() => handleStockSave(p.id)}
-                              disabled={
-                                stockUpdatingId === p.id ||
-                                Number(stockEdits[p.id]) === p.stock
-                              }
-                              aria-label={`Save stock for ${p.name}`}
-                              className="px-2.5 py-1 rounded-lg text-xs font-medium bg-gray-100 hover:bg-green-500 hover:text-white text-gray-700 disabled:opacity-40 disabled:hover:bg-gray-100 disabled:hover:text-gray-700 transition"
-                            >
-                              {stockUpdatingId === p.id ? '...' : <Check size={14} />}
-                            </button>
-                          </div>
+                        <div className="flex items-center gap-2">
+                          {isOutOfStock ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold bg-red-100 text-red-700">
+                              <AlertTriangle size={12} />
+                              Out of stock
+                            </span>
+                          ) : isLowStock ? (
+                            <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-xs font-semibold bg-amber-100 text-amber-700">
+                              <AlertTriangle size={12} />
+                              Low stock ({p.stock})
+                            </span>
+                          ) : (
+                            <span className="text-xs text-gray-600 font-medium">
+                              In stock ({p.stock})
+                            </span>
+                          )}
                         </div>
                       </td>
 
@@ -443,10 +362,12 @@ export default function OwnerProductsPage() {
             <div className="flex items-start gap-3 p-3 bg-red-50 text-red-800 rounded-xl border border-red-100">
               <AlertTriangle size={20} className="text-red-500 flex-shrink-0 mt-0.5" />
               <div className="text-sm">
-                <p className="font-semibold">Are you sure you want to delete this product?</p>
-                <p className="text-xs text-red-600 mt-0.5">
-                  &ldquo;{deletingProduct.name}&rdquo; will be deactivated and hidden from customers.
-                </p>
+                <p className="font-semibold text-red-900">Delete this product? Customers will no longer see it.</p>
+                {deletingProduct.name && (
+                  <p className="text-xs text-red-600 mt-1 font-medium">
+                    &ldquo;{deletingProduct.name}&rdquo;
+                  </p>
+                )}
               </div>
             </div>
 

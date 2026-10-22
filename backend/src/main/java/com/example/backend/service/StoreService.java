@@ -11,6 +11,7 @@ import com.example.backend.repository.UserRepository;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
 import java.util.List;
 
 @Service
@@ -18,10 +19,14 @@ public class StoreService {
 
     private final StoreRepository storeRepository;
     private final UserRepository userRepository;
+    private final ImageUploadService imageUploadService;
 
-    public StoreService(StoreRepository storeRepository, UserRepository userRepository) {
+    public StoreService(StoreRepository storeRepository,
+            UserRepository userRepository,
+            ImageUploadService imageUploadService) {
         this.storeRepository = storeRepository;
         this.userRepository = userRepository;
+        this.imageUploadService = imageUploadService;
     }
 
     // ---------- owner ----------
@@ -45,8 +50,16 @@ public class StoreService {
     @Transactional
     public StoreResponse updateMyStore(String ownerEmail, StoreRequest req) {
         Store store = findOwnStore(ownerEmail);
+        String oldLogo = store.getLogoUrl();
+
         apply(store, req);
-        return toResponse(storeRepository.save(store));
+        Store saved = storeRepository.save(store);
+
+        // logo badla ya hataya: purana Cloudinary se hatao (DB commit ke baad)
+        if (oldLogo != null && !oldLogo.equals(saved.getLogoUrl())) {
+            imageUploadService.deleteAfterCommit(List.of(oldLogo));
+        }
+        return toResponse(saved);
     }
 
     @Transactional
@@ -101,6 +114,13 @@ public class StoreService {
     }
 
     private void apply(Store s, StoreRequest r) {
+        // logo sirf hamare Cloudinary ki image ho sakti hai, koi bahari link nahi
+        String logo = r.getLogoUrl();
+        if (logo != null && !logo.isBlank() && !imageUploadService.isOurImage(logo)) {
+            throw new ApiException(HttpStatus.BAD_REQUEST,
+                    "Invalid logo URL. Upload the image through LocalKart.");
+        }
+
         s.setName(r.getName().trim());
         s.setDescription(r.getDescription());
         s.setCategory(r.getCategory());
@@ -110,7 +130,7 @@ public class StoreService {
         s.setLongitude(r.getLongitude());
         s.setOpenTime(r.getOpenTime());
         s.setCloseTime(r.getCloseTime());
-        s.setLogoUrl(r.getLogoUrl());
+        s.setLogoUrl(logo == null || logo.isBlank() ? null : logo);
     }
 
     // do GPS points ke beech seedhi doori (Haversine), km me, 1 decimal tak

@@ -45,8 +45,16 @@ public class ProductService {
     @Transactional
     public ProductResponse update(String ownerEmail, Long productId, ProductRequest req) {
         Product p = findOwnProduct(ownerEmail, productId);
+        List<String> oldUrls = new ArrayList<>(p.getImageUrls());
+
         apply(p, req);
-        return toResponse(productRepository.save(p));
+        Product saved = productRepository.save(p);
+
+        List<String> removed = oldUrls.stream()
+                .filter(u -> !saved.getImageUrls().contains(u))
+                .toList();
+        imageUploadService.deleteAfterCommit(removed);
+        return toResponse(saved);
     }
 
     @Transactional
@@ -69,7 +77,7 @@ public class ProductService {
     @Transactional(readOnly = true)
     public PageResponse<ProductResponse> listMine(String ownerEmail, int page, int size) {
         Store store = findOwnStore(ownerEmail);
-        return toPage(productRepository.findByStoreId(store.getId(), pageable(page, size)));
+        return toPage(productRepository.findByStoreIdAndActiveTrue(store.getId(), pageable(page, size)));
     }
 
     // ---------- public (customers) ----------

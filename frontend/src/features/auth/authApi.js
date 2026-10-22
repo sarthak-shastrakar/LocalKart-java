@@ -6,4 +6,7 @@ export const refreshApi        = ()     => api.post('/auth/refresh');
 export const logoutApi         = ()     => api.post('/auth/logout');
 export const deleteSessionsApi = ()     => api.delete('/users/me/sessions');
 export const getMeApi          = ()     => api.get('/users/me');
-export const deleteAccountApi  = ()     => api.delete('/users/me');
+export const deleteAccountApi  = (password) =>
+  api.delete('/users/me', {
+    data: typeof password === 'object' && password !== null ? password : { password },
+  });

@@ -13,10 +13,15 @@ public interface ProductRepository extends JpaRepository<Product, Long> {
 
     // customer homepage ke liye: approved stores ke active products
     @org.springframework.data.jpa.repository.Query("SELECT p FROM Product p WHERE p.active = true AND p.store.status = com.example.backend.model.StoreStatus.APPROVED AND p.store.owner.enabled = true AND LOWER(p.name) LIKE LOWER(CONCAT('%', :q, '%'))")
-    Page<Product> findAllActiveForPublic(@org.springframework.data.repository.query.Param("q") String q, Pageable pageable);
+    Page<Product> findAllActiveForPublic(@org.springframework.data.repository.query.Param("q") String q,
+            Pageable pageable);
 
     // owner ke liye: apne saare products
     Page<Product> findByStoreId(Long storeId, Pageable pageable);
 
     void deleteByStoreId(Long storeId);
+
+    java.util.List<Product> findAllByStoreId(Long storeId);
+
+    Page<Product> findByStoreIdAndActiveTrue(Long storeId, Pageable pageable);
 }

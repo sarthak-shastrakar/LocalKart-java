@@ -18,4 +18,13 @@ public interface CartRepository extends JpaRepository<Cart, Long> {
     @Modifying
     @Query("UPDATE Cart c SET c.store = null WHERE c.store.id = :storeId")
     void unlinkStoreFromCarts(@Param("storeId") Long storeId);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("delete from CartItem i where i.product.id in "
+            + "(select p.id from Product p where p.store.id = :storeId)")
+    int deleteItemsOfStore(@Param("storeId") Long storeId);
+
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("update Cart c set c.store = null where c.store.id = :storeId")
+    int detachStore(@Param("storeId") Long storeId);
 }
