@@ -4,10 +4,15 @@ import { Provider, useDispatch, useSelector } from 'react-redux';
 import { Toaster } from 'react-hot-toast';
 import { store } from './app/store';
 import { router } from './app/routes';
-import { setCredentials, setUser, setLoading, clearAuth } from './features/auth/authSlice';
+import {
+  setCredentials,
+  setUser,
+  setSessionRestoring,
+  clearAuth,
+} from './features/auth/authSlice';
 import { fetchCart, resetCart } from './features/cart/cartSlice';
 import { refreshApi, getMeApi } from './features/auth/authApi';
-import { FullPageSpinner } from './components/Spinner';
+import SlowRequestBanner from './components/SlowRequestBanner';
 
 // ─── Module-level guard: run the refresh call exactly once (StrictMode safe) ──
 let _initPromise = null;
@@ -26,30 +31,43 @@ const authChannel = new BroadcastChannel('auth');
 
 function AppInit({ children }) {
   const dispatch = useDispatch();
-  const { loading, user } = useSelector((s) => s.auth);
+  const { user } = useSelector((s) => s.auth);
 
-  // ── 1. App start: silent refresh ─────────────────────────────────────────
+  // ── 1. App start: silent refresh runs in the background ──────────────────
+  //    Public pages render immediately — only ProtectedRoute waits.
+  //    Network/timeout errors do NOT clear locally stored user info;
+  //    we keep `sessionRestoring=true` so ProtectedRoute can retry-gate.
   useEffect(() => {
     getInitPromise().then(async (res) => {
-      // 204 = no cookie / not logged in → treat as logged out silently
-      if (!res || res.status === 204 || res.status === 401 || res.status === 403) {
-        dispatch(setLoading(false));
+      // null  → network/timeout error: do NOT clear auth, just mark done
+      if (!res) {
+        dispatch(setSessionRestoring(false));
+        return;
+      }
+
+      // 204 / 401 / 403 → no valid session
+      if (res.status === 204 || res.status === 401 || res.status === 403) {
+        // Definitive "not logged in" — safe to clear stale user from storage
+        dispatch(clearAuth());
+        dispatch(resetCart());
+        dispatch(setSessionRestoring(false));
         return;
       }
 
       // 200 → store access token and fetch full user profile
       if (res.status === 200 && res.data?.accessToken) {
         try {
-          dispatch(setCredentials(res.data));
+          dispatch(setCredentials(res.data));   // also sets sessionRestoring=false
           const meRes = await getMeApi();
-          dispatch(setUser(meRes.data));
+          dispatch(setUser(meRes.data));         // also sets sessionRestoring=false
         } catch {
           dispatch(clearAuth());
           dispatch(resetCart());
+          dispatch(setSessionRestoring(false));
         }
+      } else {
+        dispatch(setSessionRestoring(false));
       }
-
-      dispatch(setLoading(false));
     });
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -76,16 +94,20 @@ function AppInit({ children }) {
     return () => authChannel.removeEventListener('message', handleAuthMessage);
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  if (loading) return <FullPageSpinner />;
+  // Render children immediately — no full-page spinner here
   return children;
 }
 
 export default function App() {
   return (
     <Provider store={store}>
+      {/* Non-blocking banner shown when any request stalls > 4 s */}
+      <SlowRequestBanner />
+
       <AppInit>
         <RouterProvider router={router} />
       </AppInit>
+
       <Toaster
         position="top-right"
         toastOptions={{
@@ -96,4 +118,3 @@ export default function App() {
     </Provider>
   );
 }
-

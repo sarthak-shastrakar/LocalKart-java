@@ -8,10 +8,11 @@ const loadFromStorage = () => {
     localStorage.removeItem('lk_token');
     localStorage.removeItem('accessToken');
     const user = JSON.parse(localStorage.getItem('lk_user') || 'null');
-    // Start in loading=true so the app-init spinner shows while we call /auth/refresh
-    return { token: null, user, loading: true };
+    // loading=false: public pages render immediately.
+    // sessionRestoring=true: ProtectedRoute waits for the background refresh.
+    return { token: null, user, loading: false, sessionRestoring: true };
   } catch {
-    return { token: null, user: null, loading: true };
+    return { token: null, user: null, loading: false, sessionRestoring: true };
   }
 };
 
@@ -25,6 +26,7 @@ const authSlice = createSlice({
       state.token = accessToken;
       state.user = { id: userId, name, email, role, profileImageUrl: profileImageUrl ?? null };
       state.loading = false;
+      state.sessionRestoring = false;
       try {
         // Store only non-sensitive user info for fast first-paint
         localStorage.setItem('lk_user', JSON.stringify(state.user));
@@ -34,12 +36,17 @@ const authSlice = createSlice({
     setUser(state, action) {
       state.user = action.payload;
       state.loading = false;
+      state.sessionRestoring = false;
       try {
         localStorage.setItem('lk_user', JSON.stringify(action.payload));
       } catch {}
     },
     setLoading(state, action) {
       state.loading = action.payload;
+    },
+    /** Mark the background session restore as finished (success or definitive failure). */
+    setSessionRestoring(state, action) {
+      state.sessionRestoring = action.payload;
     },
     /** Store new access token in Redux memory only (silent refresh). */
     setToken(state, action) {
@@ -49,6 +56,7 @@ const authSlice = createSlice({
       state.token = null;
       state.user = null;
       state.loading = false;
+      state.sessionRestoring = false;
       try {
         localStorage.removeItem('lk_user');
       } catch {}
@@ -56,5 +64,12 @@ const authSlice = createSlice({
   },
 });
 
-export const { setCredentials, setUser, setLoading, setToken, clearAuth } = authSlice.actions;
+export const {
+  setCredentials,
+  setUser,
+  setLoading,
+  setSessionRestoring,
+  setToken,
+  clearAuth,
+} = authSlice.actions;
 export default authSlice.reducer;
